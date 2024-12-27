@@ -1,0 +1,139 @@
+import pandas as pd
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from google.colab import files
+from IPython.display import display, clear_output
+
+def upload_and_process():
+    clear_output()
+    print("Please upload a CSV file...")
+    uploaded = files.upload()
+
+    file_name = list(uploaded.keys())[0]
+    df = pd.read_csv(file_name)
+    print(f"Data successfully loaded: {len(df)} records")
+
+    return df
+
+def get_special_communities(gender_value):
+    # Define specific communities and their colors
+    return {
+        1: '#000080',  # Navy Blue (Community 1)
+        2: '#4169E1',  # Royal Blue (Community 2)
+        3: '#6495ED',  # Blue (Community 3)
+        4: '#87CEEB',  # Light Sky Blue (Community 4)
+        5: '#ADD8E6',  # Light Blue (Community 5)
+        25: '#FF0000' if gender_value == 1 else None,  # Male OAB (Red)
+        96: '#FFD700' if gender_value == 1 else None,  # Male UUI (Gold)
+        13: '#FF4500' if gender_value == 2 else None,  # Female OAB (Orange Red)
+        8:  '#FF6347' if gender_value == 2 else None,  # Female SUI (Tomato)
+        14: '#FF7F50' if gender_value == 2 else None,  # Female MUI (Coral)
+        16: '#FFA500' if gender_value == 2 else None   # Female UUI (Orange)
+    }
+
+def create_network_visualization(data, gender_value, sample_size_per_community=100):
+    # Filter data by gender
+    gender_data = data[data['Gender'] == gender_value].copy()
+
+    # Identify the top 10 communities
+    top_communities = gender_data['Community'].value_counts()[:10]
+    print(f"\nTop 10 community sizes:")
+    print(top_communities)
+
+    # Set community colors
+    special_communities = get_special_communities(gender_value)
+    community_colors = {}
+    for comm in top_communities.index:
+        community_colors[comm] = special_communities.get(comm, '#D3D3D3AA')  # Default semi-transparent gray
+
+    # Sample up to 100 individuals per community
+    sampled_data = []
+    for comm in top_communities.index:
+        comm_data = gender_data[gender_data['Community'] == comm]
+        n_samples = min(sample_size_per_community, len(comm_data))
+        sampled_data.append(comm_data.sample(n=n_samples))
+
+    sampled_df = pd.concat(sampled_data)
+
+    # Select features for analysis
+    feature_cols = [col for col in sampled_df.columns
+                   if col not in ['number', 'Gender', 'Age (Years)', 'Community']]
+
+    # Create the network
+    G = nx.Graph()
+
+    # Add nodes and set colors
+    node_colors = []
+    for idx, row in sampled_df.iterrows():
+        G.add_node(idx)
+        node_colors.append(community_colors.get(row['Community'], '#D3D3D3AA'))  # Default semi-transparent gray
+
+    # Add edges based on feature distances
+    features = sampled_df[feature_cols]
+    scaler = StandardScaler()
+    features_scaled = scaler.fit_transform(features)
+
+    for i in range(len(features_scaled)):
+        for j in range(i+1, len(features_scaled)):
+            dist = np.linalg.norm(features_scaled[i] - features_scaled[j])
+            if dist < 0.3:
+                G.add_edge(sampled_df.index[i], sampled_df.index[j])
+
+    # Visualization
+    plt.figure(figsize=(20, 20))
+    pos = nx.spring_layout(G, k=2, iterations=50)
+
+    # Draw edges
+    nx.draw_networkx_edges(G, pos,
+                          edge_color='gray',
+                          alpha=0.05,
+                          width=0.2)
+
+    # Draw nodes
+    nx.draw_networkx_nodes(G, pos,
+                          node_color=node_colors,
+                          node_size=800,
+                          alpha=1.0,
+                          edgecolors='white',
+                          linewidths=1.5)
+
+    # Add legend
+    legend_elements = [plt.Line2D([0], [0], marker='o', color='w',
+                                 markerfacecolor=color,
+                                 markeredgecolor='white',
+                                 markeredgewidth=1.5,
+                                 label=f'Community {comm}\n(n={top_communities[comm]})',
+                                 markersize=20)
+                      for comm, color in community_colors.items()]
+
+    plt.legend(handles=legend_elements,
+              loc='center left',
+              bbox_to_anchor=(1, 0.5),
+              title="Communities",
+              fontsize=14,
+              title_fontsize=16)
+
+    gender_label = "Male" if gender_value == 1 else "Female"
+    plt.title(f'Topological Network for {gender_label}\n(n={len(sampled_df)})',
+              fontsize=20, pad=20)
+    plt.axis('off')
+
+    plt.show()
+
+def main():
+    print("Topological Network Analysis of Urinary Incontinence Data")
+    print("==========================================================")
+
+    data = upload_and_process()
+
+    print("\nProcessing male data...")
+    create_network_visualization(data, gender_value=1)
+
+    print("\nProcessing female data...")
+    create_network_visualization(data, gender_value=2)
+
+# Main execution
+main()
+
