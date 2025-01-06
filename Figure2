@@ -1,0 +1,75 @@
+Code 2-- Python Implementation-------------------------------------------------
+Code Supplement: Hierarchical Bayesian Analysis of Urinary Symptom Communities
+Python Implementation
+# Implementation of Hierarchical Bayesian Analysis for Urinary Symptom Communities
+# Authors: [Author Names]
+# Date: December 2024
+# License: MIT License
+
+import pymc3 as pm
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def analyze_community_pair(data, predictor_col, group_col, group1, group2):
+    """
+    Performs hierarchical Bayesian analysis comparing two urinary symptom communities.
+    
+    Parameters:
+    -----------
+    data : pandas.DataFrame
+        Contains the dataset with predictor and group variables
+    predictor_col : str
+        Name of the predictor column (e.g., 'Age', 'BMI', 'WAIST')
+    group_col : str
+        Name of the group column
+    group1, group2 : str/int
+        Identifiers for the two groups to compare
+        
+    Returns:
+    --------
+    dict
+        Contains model trace and summary statistics
+    """
+    # Filter data for the two communities
+    subset = data[data[group_col].isin([group1, group2])].copy()
+    
+    # Standardize predictor
+    subset['predictor_std'] = (subset[predictor_col] - subset[predictor_col].mean()) / subset[predictor_col].std()
+    
+    # Create binary outcome (0 for group1, 1 for group2)
+    subset['outcome'] = (subset[group_col] == group2).astype(int)
+    
+    # Build hierarchical model
+    with pm.Model() as model:
+        # Priors
+        alpha = pm.Normal('alpha', mu=0, sigma=2)
+        beta = pm.Normal('beta', mu=0, sigma=1)
+        
+        # Linear model
+        mu = alpha + beta * subset['predictor_std'].values
+        
+        # Likelihood
+        y = pm.Bernoulli('y', logit_p=mu, observed=subset['outcome'].values)
+        
+        # Sampling
+        trace = pm.sample(2000, tune=1000, chains=2, return_inferencedata=True)
+    
+    return {
+        'trace': trace,
+        'summary': az.summary(trace, hdi_prob=0.95),
+        'data': subset
+    }
+
+def plot_results(results):
+    """
+    Creates diagnostic plots for the Bayesian analysis.
+    
+    Parameters:
+    -----------
+    results : dict
+        Output from analyze_community_pair
+    """
+    az.plot_trace(results['trace'])
+    plt.tight_layout()
