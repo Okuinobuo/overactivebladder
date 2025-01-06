@@ -1,0 +1,20 @@
+Code 5-- External Validation-------------------------------------------------
+# Bayesian Network Construction
+import networkx as nx
+import pandas as pd
+
+# Load and preprocess data
+data = pd.read_csv("NHANES_2017.csv").dropna()
+
+# Define relationships
+edges = [
+    ("EOS", "Community1"), ("CHOL", "Community1"),
+    ("TG", "Community1"), ("UA", "Community1"),
+    ("Hb", "KIQ480"), ("Alb", "KIQ480"),
+    ("Glu", "KIQ480"), ("Cl", "KIQ480")
+]
+
+# Create and visualize graph
+G = nx.DiGraph()
+G.add_edges_from(edges)
+nx.draw(G, with_labels=True, node_color='lightblue', node_size=2000, arrowsize=20)
