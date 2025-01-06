@@ -1,0 +1,95 @@
+Code ３-- Biomarker Algorithm-------------------------------------------------
+
+import numpy as np
+from dataclasses import dataclass
+
+@dataclass 
+class BiomarkerData:
+   hct: float  # Hematocrit
+   alb: float  # Albumin 
+   plt: float  # Platelets
+   phosphorus: float  # Phosphorus
+   ggt: float  # GGT
+   lymphocyte: float  # Lymphocyte
+   neutrophil: float  # Neutrophil
+   hgb: float  # Hemoglobin
+   ua: float  # Uric Acid
+   tbil: float  # Total Bilirubin
+
+class BiomarkerIndices:
+   def __init__(self, data: BiomarkerData):
+       self.data = data
+   
+   def calculate_hematocrit_indices(self):
+       """Calculate hematocrit-centered indices"""
+       indices = {
+           # Basic multiplication patterns
+           'h3alp': self.data.hct**3 * self.data.alb * self.data.plt,
+           'h2a2lp': self.data.hct**2 * self.data.alb**2 * self.data.plt,
+           'h2alp': self.data.hct**2 * self.data.alb * self.data.plt,
+           
+           # Ratio patterns
+           'hpr': self.data.hct / self.data.phosphorus if self.data.phosphorus != 0 else np.inf,
+           
+           # Composite patterns  
+           'phg': self.data.phosphorus * self.data.hct * self.data.ggt
+       }
+       return indices
+   
+   def calculate_immune_indices(self):
+       """Calculate immune status indices"""
+       indices = {
+           # Ratio patterns
+           'lpr': self.data.lymphocyte / self.data.phosphorus if self.data.phosphorus != 0 else np.inf,
+           'nlar': self.data.neutrophil / (self.data.lymphocyte * self.data.alb)
+                  if (self.data.lymphocyte * self.data.alb) != 0 else np.inf,
+           
+           # Inverse patterns
+           'plt_inverse': 1 / self.data.plt if self.data.plt != 0 else np.inf,
+           
+           # Composite patterns
+           'hct_alb_lym': self.data.hct * self.data.alb * self.data.lymphocyte
+       }
+       return indices
+
+   def calculate_oxygen_indices(self):
+       """Calculate oxygen transport indices"""
+       indices = {
+           'hai': self.data.hgb * self.data.alb,
+           'hthbr': self.data.hct / self.data.hgb if self.data.hgb != 0 else np.inf,
+           'halps': (self.data.hgb * self.data.alb * self.data.lymphocyte) / self.data.plt
+                   if self.data.plt != 0 else np.inf
+       }
+       return indices
+   
+   def calculate_modified_indices(self):
+       """Calculate modified indices"""
+       # Logarithmic transformation patterns
+       phg = self.data.phosphorus * self.data.hct * self.data.ggt
+       ros = (self.data.ua * self.data.ggt) / self.data.alb if self.data.alb != 0 else np.inf
+       
+       indices = {
+           'log_phg': np.log(phg) if phg > 0 else np.nan,
+           'sqrt_ros': np.sqrt(ros) if ros > 0 else np.nan,
+           'hbt': self.data.hct * self.data.tbil
+       }
+       return indices
+
+def analyze_patterns(indices_dict):
+   """Analyze index patterns"""
+   patterns = {
+       'multiplication': 0,  # Multiplication patterns
+       'division': 0,       # Division patterns
+       'power': 0,         # Power patterns
+       'complex': 0        # Complex patterns
+   }
+   
+   for value in indices_dict.values():
+       if isinstance(value, (int, float)):
+           if value == np.inf or value == -np.inf:
+               patterns['division'] += 1
+           elif np.isnan(value):
+               patterns['complex'] += 1
+   
+   return patterns
+
