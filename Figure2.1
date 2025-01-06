@@ -1,0 +1,92 @@
+Code 2--- R Implementation-------------------------------------------------
+# Implementation of Hierarchical Bayesian Analysis for Urinary Symptom Communities
+# Authors: [Author Names]
+# Date: December 2024
+# License: MIT License
+
+library(rstan)
+library(dplyr)
+library(ggplot2)
+
+# Stan model definition
+stan_model <- "
+data {
+  int<lower=0> N;              // number of observations
+  vector[N] predictor_std;     // standardized predictor (Age/BMI/WAIST)
+  int<lower=0,upper=1> y[N];   // binary outcome (community membership)
+}
+
+parameters {
+  real alpha;                  // intercept
+  real beta;                   // predictor effect
+}
+
+model {
+  // Priors
+  alpha ~ normal(0, 2);
+  beta ~ normal(0, 1);
+  
+  // Likelihood
+  y ~ bernoulli_logit(alpha + beta * predictor_std);
+}
+
+generated quantities {
+  vector[N] log_lik;
+  for (n in 1:N) {
+    log_lik[n] = bernoulli_logit_lpmf(y[n] | alpha + beta * predictor_std[n]);
+  }
+}
+"
+
+analyze_community_pair <- function(data, predictor_col, group_col, group1, group2) {
+  # Filter and prepare data
+  subset_data <- data %>%
+    filter(!!sym(group_col) %in% c(group1, group2)) %>%
+    mutate(
+      predictor_std = scale(!!sym(predictor_col)),
+      outcome = as.integer(!!sym(group_col) == group2)
+    )
+  
+  # Prepare Stan data
+  stan_data <- list(
+    N = nrow(subset_data),
+    predictor_std = subset_data$predictor_std,
+    y = subset_data$outcome
+  )
+  
+  # Fit model
+  fit <- stan(
+    model_code = stan_model,
+    data = stan_data,
+    chains = 2,
+    iter = 2000,
+    warmup = 1000,
+    cores = 2
+  )
+  
+  # Return results
+  list(
+    fit = fit,
+    summary = summary(fit)$summary,
+    data = subset_data
+  )
+}
+
+plot_diagnostics <- function(results) {
+  # Trace plots
+  traceplot(results$fit)
+  
+  # Posterior distributions
+  plot_posterior <- function(param) {
+    posterior <- as.matrix(results$fit)[, param]
+    ggplot(data.frame(value = posterior), aes(x = value)) +
+      geom_density(fill = "lightblue", alpha = 0.5) +
+      ggtitle(paste("Posterior Distribution of", param)) +
+      theme_minimal()
+  }
+  
+  list(
+    alpha_post = plot_posterior("alpha"),
+    beta_post = plot_posterior("beta")
+  )
+}
