@@ -1,0 +1,169 @@
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+
+# Define Sparse Autoencoder (SAE)
+class SparseAutoencoder(nn.Module):
+    def __init__(self, input_dim, encoding_dim):
+        super(SparseAutoencoder, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, encoding_dim),
+            nn.ReLU()
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(encoding_dim, input_dim),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return encoded, decoded
+
+# Training function
+def train_model(model, train_loader, num_epochs=100, learning_rate=0.001):
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    for epoch in range(num_epochs):
+        total_loss = 0
+        for batch in train_loader:
+            data = batch[0]
+            optimizer.zero_grad()
+
+            # Forward pass
+            encoded, decoded = model(data)
+
+            # Loss calculation
+            loss = criterion(decoded, data)
+
+            # Backward pass
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        if (epoch + 1) % 10 == 0:
+            print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss/len(train_loader):.6f}')
+
+    return model
+
+# Data preparation and scaling
+def prepare_data(data, batch_size=256):
+    tensor = torch.tensor(data, dtype=torch.float32)
+    dataset = TensorDataset(tensor)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    return tensor, loader
+
+# Visualization of latent space (Plots a & b)
+def visualize_latent_space(encoded_data, title):
+    plt.scatter(encoded_data[:, 0], encoded_data[:, 1], alpha=0.5)
+    plt.title(title)
+    plt.xlabel("Feature 1")
+    plt.ylabel("Feature 2")
+    plt.show()
+
+# Power-law analysis (Plot c)
+def plot_power_law(data1, data2):
+    pca1 = PCA().fit(data1)
+    pca2 = PCA().fit(data2)
+
+    eigenvalues1 = pca1.explained_variance_
+    eigenvalues2 = pca2.explained_variance_
+
+    plt.plot(np.log(range(1, len(eigenvalues1)+1)), np.log(eigenvalues1), label="Questionnaire", marker='o')
+    plt.plot(np.log(range(1, len(eigenvalues2)+1)), np.log(eigenvalues2), label="Community", marker='o')
+    plt.xlabel("log(Index)")
+    plt.ylabel("log(Eigenvalue)")
+    plt.title("Power Law Analysis")
+    plt.legend()
+    plt.show()
+
+# Cumulative explained variance (Plot d)
+def plot_cumulative_variance(data1, data2):
+    pca1 = PCA().fit(data1)
+    pca2 = PCA().fit(data2)
+
+    plt.plot(np.cumsum(pca1.explained_variance_ratio_), label="Questionnaire")
+    plt.plot(np.cumsum(pca2.explained_variance_ratio_), label="Community")
+    plt.title("PCA Cumulative Explained Variance")
+    plt.xlabel("Number of Components")
+    plt.ylabel("Cumulative Variance Ratio")
+    plt.legend()
+    plt.show()
+
+# Clustering entropy (Plot e)
+def compute_clustering_entropy(data, bins=50):
+    H, _, _ = np.histogram2d(data[:, 0], data[:, 1], bins=bins)
+    H = H / H.sum()  # Normalize
+    H = H[H > 0]  # Use non-zero values
+    return -np.sum(H * np.log(H))
+
+def plot_clustering_entropy(entropy1, entropy2):
+    plt.bar(["Community", "Questionnaire"], [entropy1, entropy2])
+    plt.title("Clustering Entropy Comparison")
+    plt.ylabel("Entropy")
+    plt.show()
+
+# PCA distribution comparison (Plot f)
+def plot_pca_distribution(data1, data2):
+    pca1 = PCA(n_components=2).fit_transform(data1)
+    pca2 = PCA(n_components=2).fit_transform(data2)
+
+    plt.scatter(pca1[:, 0], pca1[:, 1], alpha=0.5, label="Questionnaire")
+    plt.scatter(pca2[:, 0], pca2[:, 1], alpha=0.8, label="Community")
+    plt.title("PCA Distribution Comparison")
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    plt.legend()
+    plt.show()
+
+# Main execution
+def main(questionnaire_data, community_data):
+    # Scale the data
+    scaler = StandardScaler()
+    questionnaire_data = scaler.fit_transform(questionnaire_data)
+    community_data = scaler.fit_transform(community_data)
+
+    # Prepare data for SAE
+    questionnaire_tensor, questionnaire_loader = prepare_data(questionnaire_data)
+    community_tensor, community_loader = prepare_data(community_data)
+
+    # Define and train SAE models
+    questionnaire_sae = SparseAutoencoder(input_dim=questionnaire_data.shape[1], encoding_dim=4)
+    community_sae = SparseAutoencoder(input_dim=community_data.shape[1], encoding_dim=2)
+
+    print("Training Questionnaire SAE...")
+    train_model(questionnaire_sae, questionnaire_loader)
+
+    print("Training Community SAE...")
+    train_model(community_sae, community_loader)
+
+    # Generate latent space
+    with torch.no_grad():
+        q_encoded, _ = questionnaire_sae(questionnaire_tensor)
+        c_encoded, _ = community_sae(community_tensor)
+
+        q_encoded = q_encoded.numpy()
+        c_encoded = c_encoded.numpy()
+
+    # Visualize plots
+    visualize_latent_space(c_encoded, "Community Encoded Space (Plot a)")
+    visualize_latent_space(q_encoded, "Questionnaire Encoded Space (Plot b)")
+    plot_power_law(questionnaire_data, community_data)
+    plot_cumulative_variance(questionnaire_data, community_data)
+    q_entropy = compute_clustering_entropy(q_encoded)
+    c_entropy = compute_clustering_entropy(c_encoded)
+    plot_clustering_entropy(c_entropy, q_entropy)
+    plot_pca_distribution(questionnaire_data, community_data)
+
+# Example data
+np.random.seed(42)
+questionnaire_sample = np.random.rand(1000, 21)  # 21 features
+community_sample = np.random.rand(1000, 11)  # 11 features
+
+main(questionnaire_sample, community_sample)
