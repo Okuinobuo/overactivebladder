@@ -1,0 +1,109 @@
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.metrics import roc_curve, auc
+from sklearn.model_selection import train_test_split
+from itertools import combinations
+
+# Load data
+data = pd.read_csv("biomarker_data.csv")  # Ensure the file is available
+target = "OAB_Diagnosis"  # Target label (0: non-OAB, 1: OAB)
+
+# Factors derived from Bayesian network (direct and indirect)
+direct_factors = ["Phosphorus", "Hct", "GGT"]
+indirect_factors = ["Potassium", "MCV", "Alb", "Plt", "Lymphocyte", "Neutrophil", "Hgb", "Creatinine", "Uric_Acid", "Sodium"]
+
+# Combine all factors
+factors = direct_factors + indirect_factors
+X = data[factors]
+y = data[target]
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# Convert to PyTorch tensors
+X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32)
+y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32).unsqueeze(1)
+X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32)
+y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32).unsqueeze(1)
+
+# Define the model
+class BiomarkerModel(nn.Module):
+    def __init__(self, input_size):
+        super(BiomarkerModel, self).__init__()
+        self.fc1 = nn.Linear(input_size, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.output = nn.Linear(32, 1)
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = torch.relu(self.fc2(x))
+        x = torch.sigmoid(self.output(x))
+        return x
+
+# Function to calculate AUC
+def evaluate_model(X_train, y_train, X_test, y_test, input_size):
+    model = BiomarkerModel(input_size)
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    # Train the model
+    for epoch in range(10):  # Short number of epochs
+        model.train()
+        optimizer.zero_grad()
+        output = model(X_train)
+        loss = criterion(output, y_train)
+        loss.backward()
+        optimizer.step()
+
+    # Evaluate the model
+    model.eval()
+    y_pred_prob = model(X_test).detach().numpy()
+    fpr, tpr, _ = roc_curve(y_test.numpy(), y_pred_prob)
+    return auc(fpr, tpr)
+
+# Function to calculate and evaluate feature combinations
+def evaluate_combinations(X_train, y_train, X_test, y_test, factors, max_depth=3):
+    current_factors = factors
+    results = []
+
+    for depth in range(1, max_depth + 1):
+        print(f"Evaluating combinations of depth {depth}...")
+        new_factors = []
+        for comb in combinations(current_factors, 2):
+            # Create new features (product of combinations)
+            feature_name = "*".join(comb)
+            X_train[feature_name] = X_train[comb[0]] * X_train[comb[1]]
+            X_test[feature_name] = X_test[comb[0]] * X_test[comb[1]]
+
+            # Calculate AUC
+            auc_score = evaluate_model(
+                torch.tensor(X_train[[feature_name]].values, dtype=torch.float32),
+                y_train_tensor,
+                torch.tensor(X_test[[feature_name]].values, dtype=torch.float32),
+                y_test_tensor,
+                input_size=1
+            )
+
+            print(f"Combination: {comb}, AUC: {auc_score:.4f}")
+            results.append((comb, auc_score))
+
+            # If AUC improves, pass the feature to the next round
+            if auc_score > 0.6:  # Adjust threshold as needed
+                new_factors.append(feature_name)
+
+        # Update the factor list for the next round
+        current_factors = new_factors
+
+    # Return final results
+    return sorted(results, key=lambda x: x[1], reverse=True)
+
+# Main execution
+if __name__ == "__main__":
+    results = evaluate_combinations(X_train.copy(), y_train_tensor, X_test.copy(), y_test_tensor, factors)
+    print("Top combinations:")
+    for comb, auc_score in results[:10]:  # Display the top 10 combinations
+        print(f"Combination: {comb}, AUC: {auc_score:.4f}")
