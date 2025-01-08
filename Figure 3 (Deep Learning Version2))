@@ -1,0 +1,104 @@
+import numpy as np
+import pandas as pd
+import itertools
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.metrics import roc_curve, auc
+from sklearn.model_selection import train_test_split
+
+# Load dataset
+data = pd.read_csv("biomarker_data.csv")  # Ensure the file exists in the directory
+
+# Specify biomarkers and target variable
+biomarkers = [
+    "Phosphorus", "Hct", "GGT", "Potassium", "MCV", "Alb", "Plt",
+    "Lymphocyte", "Neutrophil", "Hgb", "Creatinine", "Uric_Acid", "Sodium"
+]
+target = "OAB_Diagnosis"  # 0: non-OAB, 1: OAB
+
+# Split dataset into training and testing sets
+X = data[biomarkers]
+y = data[target]
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# Convert data into PyTorch tensors
+X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32)
+y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32).unsqueeze(1)
+X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32)
+y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32).unsqueeze(1)
+
+# Define deep learning model
+class BiomarkerModel(nn.Module):
+    def __init__(self, input_size):
+        super(BiomarkerModel, self).__init__()
+        self.fc1 = nn.Linear(input_size, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, 32)
+        self.output = nn.Linear(32, 1)
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = torch.relu(self.fc2(x))
+        x = self.dropout(x)
+        x = torch.relu(self.fc3(x))
+        x = torch.sigmoid(self.output(x))
+        return x
+
+# Generate all possible combinations of biomarkers
+def generate_all_combinations(features, max_size):
+    combinations = []
+    for size in range(2, max_size + 1):
+        combinations += list(itertools.combinations(features, size))
+    return combinations
+
+# Evaluate AUC for a specific combination
+def evaluate_combination(model, X_train, y_train, X_test, y_test):
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    epochs = 10
+
+    # Train the model
+    for epoch in range(epochs):
+        model.train()
+        optimizer.zero_grad()
+        output = model(X_train)
+        loss = criterion(output, y_train)
+        loss.backward()
+        optimizer.step()
+
+    # Evaluate the model using ROC and AUC
+    model.eval()
+    y_pred_prob = model(X_test).detach().numpy()
+    fpr, tpr, _ = roc_curve(y_test.numpy(), y_pred_prob)
+    return auc(fpr, tpr)
+
+# Main execution
+if __name__ == "__main__":
+    max_comb_size = 6
+    combinations = generate_all_combinations(biomarkers, max_comb_size)
+    print(f"Total combinations to evaluate: {len(combinations)}")  # Should be 10,400,600
+
+    # Process combinations in batches to handle large-scale evaluation
+    batch_size = 1000
+    results = []
+    for i in range(0, len(combinations), batch_size):
+        batch = combinations[i:i + batch_size]
+        print(f"Processing batch {i // batch_size + 1} of {len(combinations) // batch_size + 1}...")
+        for comb in batch:
+            selected_features = list(comb)
+            X_train_subset = torch.tensor(X_train[selected_features].values, dtype=torch.float32)
+            X_test_subset = torch.tensor(X_test[selected_features].values, dtype=torch.float32)
+            model = BiomarkerModel(len(selected_features))
+            auc_score = evaluate_combination(model, X_train_subset, y_train_tensor, X_test_subset, y_test_tensor)
+            results.append((comb, auc_score))
+
+    # Sort results by AUC
+    results = sorted(results, key=lambda x: x[1], reverse=True)
+
+    # Display top 20 combinations
+    print("Top 20 biomarker combinations:")
+    for comb, auc_score in results[:20]:
+        print(f"Combination: {comb}, AUC: {auc_score:.4f}")
