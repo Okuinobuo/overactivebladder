@@ -1,0 +1,140 @@
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+
+# Define the Autoencoder
+class Autoencoder(nn.Module):
+    def __init__(self, input_dim, encoding_dim):
+        super(Autoencoder, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, encoding_dim),
+            nn.ReLU()
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(encoding_dim, input_dim),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return encoded, decoded
+
+# Training function for Autoencoder
+def train_autoencoder(model, dataloader, num_epochs=100, learning_rate=0.001):
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    for epoch in range(num_epochs):
+        total_loss = 0
+        for batch in dataloader:
+            data = batch[0]
+            optimizer.zero_grad()
+            encoded, decoded = model(data)
+            loss = criterion(decoded, data)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        if (epoch + 1) % 10 == 0:
+            print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss/len(dataloader):.6f}')
+
+    return model
+
+# Scale the data
+def scale_data(data):
+    scaler = StandardScaler()
+    return scaler.fit_transform(data)
+
+# Create a DataLoader
+def create_dataloader(data, batch_size=256):
+    tensor_data = torch.tensor(data, dtype=torch.float32)
+    dataset = TensorDataset(tensor_data)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    return tensor_data, dataloader
+
+# Visualize the latent space
+def visualize_latent_space(encoded_data, title):
+    plt.scatter(encoded_data[:, 0], encoded_data[:, 1], alpha=0.5)
+    plt.title(title)
+    plt.xlabel("Latent Dimension 1")
+    plt.ylabel("Latent Dimension 2")
+    plt.show()
+
+# Plot cumulative variance using PCA
+def plot_cumulative_variance(data, title):
+    pca = PCA()
+    pca.fit(data)
+    cumulative_variance = np.cumsum(pca.explained_variance_ratio_)
+    plt.plot(cumulative_variance)
+    plt.title(title)
+    plt.xlabel("Number of Components")
+    plt.ylabel("Cumulative Explained Variance")
+    plt.show()
+
+# Calculate clustering entropy
+def compute_clustering_entropy(data, bins=50):
+    H, _, _ = np.histogram2d(data[:, 0], data[:, 1], bins=bins)
+    H = H / H.sum()  # Normalize
+    H = H[H > 0]  # Use non-zero values
+    return -np.sum(H * np.log(H))
+
+# Main processing
+def main(questionnaire_data, community_data):
+    # Scale and normalize the data
+    questionnaire_data = scale_data(questionnaire_data)
+    community_data = scale_data(community_data)
+
+    # Create DataLoaders
+    questionnaire_tensor, questionnaire_loader = create_dataloader(questionnaire_data)
+    community_tensor, community_loader = create_dataloader(community_data)
+
+    # Define Autoencoder models
+    questionnaire_autoencoder = Autoencoder(input_dim=questionnaire_data.shape[1], encoding_dim=4)
+    community_autoencoder = Autoencoder(input_dim=community_data.shape[1], encoding_dim=2)
+
+    # Train the models
+    print("Training Questionnaire Autoencoder...")
+    train_autoencoder(questionnaire_autoencoder, questionnaire_loader)
+
+    print("Training Community Autoencoder...")
+    train_autoencoder(community_autoencoder, community_loader)
+
+    # Extract latent space
+    with torch.no_grad():
+        questionnaire_encoded, _ = questionnaire_autoencoder(questionnaire_tensor)
+        community_encoded, _ = community_autoencoder(community_tensor)
+
+        questionnaire_encoded = questionnaire_encoded.numpy()
+        community_encoded = community_encoded.numpy()
+
+    # Visualize latent space
+    visualize_latent_space(questionnaire_encoded, "Questionnaire Latent Space")
+    visualize_latent_space(community_encoded, "Community Latent Space")
+
+    # Plot cumulative explained variance
+    plot_cumulative_variance(questionnaire_data, "Questionnaire Cumulative Explained Variance")
+    plot_cumulative_variance(community_data, "Community Cumulative Explained Variance")
+
+    # Compare clustering entropy
+    q_entropy = compute_clustering_entropy(questionnaire_encoded)
+    c_entropy = compute_clustering_entropy(community_encoded)
+    print(f"Questionnaire Clustering Entropy: {q_entropy:.3f}")
+    print(f"Community Clustering Entropy: {c_entropy:.3f}")
+
+    # Plot entropy comparison
+    plt.bar(["Community", "Questionnaire"], [c_entropy, q_entropy])
+    plt.title("Clustering Entropy Comparison")
+    plt.ylabel("Entropy")
+    plt.show()
+
+# Example execution
+np.random.seed(42)
+questionnaire_sample = np.random.rand(1000, 21)  # Questionnaire data (21 dimensions)
+community_sample = np.random.rand(1000, 11)  # Community data (11 dimensions)
+
+main(questionnaire_sample, community_sample)
